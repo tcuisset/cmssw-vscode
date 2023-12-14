@@ -1,0 +1,93 @@
+{
+  "name": "cmssw-vscode",
+  "displayName": "cmssw-vscode",
+  "description": "Integrate CMSSW in VSCode",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cmssw-vscode.buildPythonSymlinkTree",
+        "title": "CMSSW : Build python symlink tree"
+      },
+      {
+        "command": "cmssw-vscode.updatePythonConfig",
+        "title": "CMSSW : update python includes config"
+      },
+      {
+        "command": "cmssw-vscode.makeScramVenv",
+        "title": "CMSSW : set up python virtual environment"
+      },
+      {
+        "command": "cmssw-vscode.chooseCmsswWorkingArea",
+        "title": "Choose the current CMSSW working area"
+      }
+    ],
+    "configuration": {
+      "title": "CMSSW-VSCode",
+      "properties": {
+        "cmssw.pythonPackagesToIndex": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "FWCore/ParameterSet"
+          ],
+          "description": "List of CMSSW packages to index python files"
+        },
+        "cmssw.pythonExternalsToIndex": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "List of CMSSW python externals to index (example : py3-tensorflow)"
+        }
+      }
+    },
+    "terminal": {
+      "profiles": [
+        {
+          "id": "cmssw-vscode.cmsenv-shell",
+          "title": "Run a bash shell with cmsenv"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test"
+  },
+  "dependencies": {
+    "@vscode/python-extension": "^1.0.5"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "18.x",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.1",
+    "@typescript-eslint/parser": "^6.13.1",
+    "@vscode/test-cli": "^0.0.4",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.2"
+  },
+  "extensionDependencies": [
+    "ms-python.python",
+    "ms-python.vscode-pylance"
+  ]
+}
