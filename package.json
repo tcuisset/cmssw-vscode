@@ -16,6 +16,14 @@
   "contributes": {
     "commands": [
       {
+        "command": "cmssw-vscode.setupPython",
+        "title": "CMSSW : Setup python for current release"
+      },
+      {
+        "command": "cmssw-vscode.setupCpp",
+        "title": "CMSSW : Setup C++ for current release"
+      },
+      {
         "command": "cmssw-vscode.buildPythonSymlinkTree",
         "title": "CMSSW : Build python symlink tree"
       },
@@ -73,7 +81,9 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "@vscode/python-extension": "^1.0.5"
+    "@vscode/python-extension": "^1.0.5",
+    "vscode-cpptools": "^2.1.2",
+    "vscode-jsonrpc" :"*"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.6",
@@ -88,6 +98,7 @@
   },
   "extensionDependencies": [
     "ms-python.python",
-    "ms-python.vscode-pylance"
+    "ms-python.vscode-pylance",
+    "ms-vscode.cpptools"
   ]
 }
