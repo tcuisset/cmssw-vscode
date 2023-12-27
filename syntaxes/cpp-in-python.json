@@ -1,0 +1,15 @@
+{
+  "scopeName": "python.embedded.cpp",
+  "injectionSelector": "R:string.quoted.multi.python",
+  "patterns": [
+    {
+      "include": "#python.embedded.cpp.multiline"
+    }
+  ],
+  "repository": {
+    "python.embedded.cpp.multiline": {
+      "match": "TODO",
+      "name": "python.embedded.cpp"
+    }
+  }
+}

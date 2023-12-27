@@ -70,7 +70,17 @@
           "title": "Run a bash shell with cmsenv"
         }
       ]
-    }
+    },
+    "grammars": [
+      {
+        "scopeName": "python.embedded.cpp",
+        "path": "./syntaxes/cpp-in-python.json",
+        "injectTo": ["source.python"],
+        "embeddedLanguages": {
+          "python.embedded.cpp": "cpp"
+        }
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
