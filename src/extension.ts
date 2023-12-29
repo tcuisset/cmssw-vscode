@@ -9,14 +9,44 @@ import * as py from './python'
 import { assert } from 'console';
 
 
-function makeTerminalOptions(release:com.CmsRelease):vscode.TerminalOptions {
-	return {name:release.cmssw_release, 
-		shellPath:path.join(release.rootFolder.fsPath, ".vscode-cmssw", "cmsenv_launcher.sh"),
-	shellArgs : [release.rootFolder.fsPath, "/bin/bash"]}
+function cmsenvLauncherPath(release:com.CmsRelease) {
+	return vscode.Uri.joinPath(release.rootFolder, ".vscode-cmssw", "cmsenv_launcher.sh")
+}
+
+/**
+ * Creates a cmsenv_launcher.sh file in .vscode-cmssw
+ * @param release 
+ */
+async function createCmsenvLauncher(release:com.CmsRelease) {
+	await com.createExecutableScript(cmsenvLauncherPath(release),
+		"#!/bin/bash\n" +
+		'cd "$(dirname "$0")"\n' + // cd to script directory
+		"cmsenv\n" +
+		"cd - > /dev/null\n" +
+		'exec "$@"\n'
+	)
+}
+
+/**
+ * Path to the bash cmsenv launcher. The file has to be named bash so that the VSCode shell integration works automatically
+ */
+function bashCmsenvLauncherPath(release:com.CmsRelease) {
+	return vscode.Uri.joinPath(release.rootFolder, ".vscode-cmssw", "cmsenv_launchers", "bash")
+}
+async function createBashCmsenvLauncher(release:com.CmsRelease) {
+	await com.createExecutableScript(bashCmsenvLauncherPath(release),
+		"#!/bin/bash\n" +
+		'cd "$(dirname "$0")"\n' + // cd to script directory
+		"cmsenv\n" +
+		"cd - > /dev/null\n" +
+		'exec /bin/bash "$@"\n'
+	)
 }
 
 function makeTerminalProfile(release:com.CmsRelease):vscode.TerminalProfile {
-	return new vscode.TerminalProfile(makeTerminalOptions(release))
+	return new vscode.TerminalProfile( {name:release.cmssw_release,
+		shellPath:bashCmsenvLauncherPath(release).fsPath,
+		})
 }
 
 /**
@@ -57,8 +87,14 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.updatePythonConfig', async () => {
 		const release = com.getCurrentRelease()
-		if (release !== undefined)
-			return py.updatePythonConfig(release, context.workspaceState, vscode.workspace.getConfiguration('cmssw').get('pythonExternalsToIndex', []))
+		if (release !== undefined) {
+			try {
+				await py.updatePythonConfig(release, context.workspaceState, vscode.workspace.getConfiguration('cmssw').get('pythonExternalsToIndex', []))
+			} catch (e) {
+				console.log("Caught e")
+				console.log(e)
+			}
+		}
 	}))
 
 	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.makeScramVenv', async () => {
@@ -84,18 +120,42 @@ export function activate(context: vscode.ExtensionContext) {
 		},
 	}))
 
+	context.subscriptions.push(com.onReleaseChange.event(async (e)=> {
+		if (e.newRelease !== undefined) {
+			try {
+				const stat = await vscode.workspace.fs.stat(bashCmsenvLauncherPath(e.newRelease))
+				if (stat.type == vscode.FileType.File)
+					return
+			} catch (exc) {
+				if (com.isENOENT(exc))
+					await createBashCmsenvLauncher(e.newRelease)
+				else
+					throw exc
+			}
+		}
+	}))
+
 	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.chooseCmsswWorkingArea', async () => {
 		const releases = await com.findCmsswReleases()
 		let displayStrings = new Array<string>()
 		for (const release of releases) {
 			displayStrings.push(com.userFriendlyReleaseLocation(release))
 		}
+		displayStrings.push("Disable")
 		// TODO add custom location option
-		const qpResult = await vscode.window.showQuickPick(
-			displayStrings
+		const qpResult = await vscode.window.showQuickPick(displayStrings,
+			{ title : "Choose a CMSSW working area", }
 		)
 		if (qpResult !== undefined) {
-			await com.setCurrentRelease(releases[displayStrings.indexOf(qpResult)])
+			let newReleaseChosen;
+			if (qpResult === "Disable") {
+				newReleaseChosen = undefined
+			} else {
+				newReleaseChosen = releases[displayStrings.indexOf(qpResult)]
+			}
+			await com.setCurrentRelease(newReleaseChosen)
+			if (newReleaseChosen === undefined)
+				return;
 			const newRelease = com.getCurrentRelease()
 			if (newRelease === undefined) {
 				throw Error("Could not set release")

@@ -92,24 +92,29 @@ async function buildSinglePythonSymlink(release:CmsRelease, symlinkTreeBase:vsco
         throw new Error("Unkwown link target type")
     }
     
-    try {
-        await nodeFs.symlink(target, linkPath);
-        console.log("Wrote symlink from " + linkPath + " to " + target);
-    } catch (e) {
-		if (e instanceof Error && "code" in e && e.code == "EEXIST") {
-			// Symlink already exists. Check it is correct
-			if (path.resolve(await nodeFs.readlink(linkPath)) === path.resolve(target))
-				return
-			else {
-				// recreate it
-				await nodeFs.unlink(linkPath);
-				await nodeFs.symlink(target, linkPath);
-			}
+	// Making the symlink
+	let makeSymlinkFct = async () => {
+		try {
+			await com.makeOrUpdateSymlink(target, linkPath)
+			console.log("Wrote symlink from " + linkPath + " to " + target);
+		} catch (e) {
+			console.log("Could not create symlink from " + linkPath + " to " + target + " due to ");
+			console.log(e);
+			throw Error("Could not create symlink from " + linkPath + " to " + target + " due to " + e?.toString())
 		}
-		console.log("Could not create symlink from " + linkPath + " to " + target + " due to ");
-		console.log(e);
-		throw Error("Could not create symlink from " + linkPath + " to " + target + " due to " + e?.toString())
-    }
+	}
+	// Creating an __init__.py file so pylance will think it's a package 
+	let makeInitFct = async () => {
+		let initFileHandle;
+		try {
+			// Todo check if file already exists
+			initFileHandle = await nodeFs.open(path.join(linkPathBase, "__init__.py"), "w")
+		}  finally {
+			await initFileHandle?.close()
+		}
+	}
+
+	await Promise.all([makeSymlinkFct(), makeInitFct()])
 }
 
 /**
@@ -133,7 +138,7 @@ export async function makeCfiPythonSymlink(release:CmsRelease) : Promise<void> {
 	const symlinkTreeBase = await getPythonSymlinkTreeFolder(release, CmsFileType.CfiPython, false);
 	// cfi python located at /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/cfipython/$SCRAM_ARCH/Pkg/SubPjg/thing_cfi.py
 	const target = path.join(release.cvmfsPath(), "cfipython", release.scram_arch)
-	await nodeFs.symlink(target, symlinkTreeBase.fsPath);
+	await com.makeOrUpdateSymlink(target, symlinkTreeBase.fsPath)
 }
 
 
@@ -170,12 +175,19 @@ function pathToScramVenv(release:CmsRelease) {
 	return vscode.Uri.joinPath(release.rootFolder, "venv", release.scram_arch)
 }
 
+/**
+ * Uses the python extension API to resolve the scram venv virtual environment
+ * @param release 
+ * @returns whatever pythonApi.environments.resolveEnvironment returns (ResolvedEnvironment|undefined)
+ * @throws in case venv was not yet created for release
+ */
 async function resolvePythonEnvironment(release:CmsRelease) {
 	const pathToVenv = pathToScramVenv(release)
+	const pathToPython = vscode.Uri.joinPath(pathToVenv, "bin", "python3_cmsenv")
 	try {
-		await vscode.workspace.fs.stat(pathToVenv);
+		await vscode.workspace.fs.stat(pathToPython); // to check if venv folder exists and the python3_cmsenv script exists
 		const pythonApi: PythonExtension = await PythonExtension.api();
-		return pythonApi.environments.resolveEnvironment({id:release.cmssw_release, path: pathToVenv.fsPath})
+		return pythonApi.environments.resolveEnvironment({id:release.cmssw_release, path: pathToPython.fsPath})
 	} catch (e) {
 		if (e instanceof vscode.FileSystemError && e.code == "ENOENT") {
 			throw Error("Python venv for CMSSW release " + release.toString() + " does not exist yet. You should create it first.")
@@ -193,24 +205,40 @@ function parsePythonVersionToCmssw(versionInfo:(VersionInfo & { readonly sysVers
 }
 
 /**  Update config of current workspace to point python extension include path to correct locations
-@param keepExternals list of externals to keep in include path (otherwise too many are included and it slows down everything)
-*/
+ * @param keepExternals list of externals to keep in include path (otherwise too many are included and it slows down everything) (for now does not work, all externals are included)
+ */
 export async function updatePythonConfig(release:CmsRelease, store:vscode.Memento, keepExternals:string[]=[]) : Promise<any> {
-	const pythonEnvironment = resolvePythonEnvironment(release)
+	const pythonEnvironment = resolvePythonEnvironment(release) // Needed to show the environment in the list of python envs for notebooks/python files
 
 	let pythonConfig = vscode.workspace.getConfiguration("python.analysis", workspaceFolderForRelease(release)) // python.analysis.include
 	const prefix = vscode.workspace.asRelativePath(release.rootFolder, false) + "/"
 	
 	let promises:Thenable<any>[] = []
-	promises.push(updateConfigKeepingTrack(pythonConfig, "include", new ConfigManager("workspaceConfig.python.analysis.include", store),
-		[prefix + ".vscode-cmssw/python", prefix+"cfipython", prefix + ".vscode-cmssw/cfipython"]))
+	//promises.push(updateConfigKeepingTrack(pythonConfig, "include", new ConfigManager("workspaceConfig.python.analysis.include", store),
+	//	[prefix + ".vscode-cmssw/python", prefix+"cfipython", prefix + ".vscode-cmssw/cfipython"]))
 	
-	/* 
-	/cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/python
-	/cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/lib/el8_amd64_gcc12
-	/cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/coral/CORAL_2_3_21-28dabfc38a6bf00dd35728bb54daa6e2/el8_amd64_gcc12/python
-	/cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/coral/CORAL_2_3_21-28dabfc38a6bf00dd35728bb54daa6e2/el8_amd64_gcc12/lib
-	*/
+	// "CMSSW_14_0_0_pre1/.vscode-cmssw/cfipython",
+    //     "CMSSW_14_0_0_pre1/.vscode-cmssw/python"
+	promises.push(updateConfigKeepingTrack(pythonConfig, "extraPaths", new ConfigManager("workspaceConfig.python.analysis.extraPaths", store),
+		[prefix + ".vscode-cmssw/cfipython", prefix + ".vscode-cmssw/python"]))
+	
+	promises.push(updateConfigKeepingTrack(pythonConfig, "exclude", new ConfigManager("workspaceConfig.python.analysis.exclude", store),
+		[prefix + ".vscode-cmssw", prefix + "cfipython"]))
+
+	// Temporary : 
+	promises.push(pythonEnvironment)
+
+	return Promise.allSettled(promises)
+}
+
+// Old code for external exclude (does not work due to pylance ignoring it)
+	/*
+	
+	// /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/python
+	// /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/lib/el8_amd64_gcc12
+	// /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/coral/CORAL_2_3_21-28dabfc38a6bf00dd35728bb54daa6e2/el8_amd64_gcc12/python
+	// /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/coral/CORAL_2_3_21-28dabfc38a6bf00dd35728bb54daa6e2/el8_amd64_gcc12/lib
+	
 	const cvmfsPrefix = path.join("/cvmfs", "cms.cern.ch", release.scram_arch)
 	// Prevent access of python packages on CVMFS as they use __init__ magic that does not work with pylance
 	// We want to use our symlink tree instead, so exclude the paths
@@ -233,9 +261,7 @@ export async function updatePythonConfig(release:CmsRelease, store:vscode.Mement
 		}
 	}
 	promises.push(updateConfigKeepingTrack(pythonConfig, "exclude", new ConfigManager("workspaceConfig.python.analysis.exclude", store), excludePaths)) 
-	return Promise.allSettled(promises)
-}
-
+	*/
 
 
 /**
@@ -247,12 +273,10 @@ export async function updatePythonConfig(release:CmsRelease, store:vscode.Mement
  */
 export async function makeVirtualEnvironment(release:CmsRelease, forceRecreate:boolean=false):Promise<void> { 
 	// CMSSW_14_0_0_pre1/venv/el8_amd64_gcc12/bin/python3_cmsenv
-	const pathToScramVenv =  vscode.Uri.joinPath(release.rootFolder, "venv")
-	const pathToPythonCmsenv = vscode.Uri.joinPath(pathToScramVenv, release.scram_arch, "bin", "python3_cmsenv")
+	const pathToPythonCmsenv = vscode.Uri.joinPath(pathToScramVenv(release), "bin", "python3_cmsenv")
 
-	
 	try {
-		await vscode.workspace.fs.stat(pathToScramVenv)
+		await vscode.workspace.fs.stat(pathToScramVenv(release))
 	} catch {
 		await promisify(cp.exec)('cmsenv && scram-venv', {cwd: release.rootFolder.fsPath});
 	}
@@ -263,20 +287,13 @@ export async function makeVirtualEnvironment(release:CmsRelease, forceRecreate:b
 			return;
 	} catch {}
 	
-	await vscode.workspace.fs.writeFile(pathToPythonCmsenv,
-		new TextEncoder().encode(
+	await com.createExecutableScript(pathToPythonCmsenv, 
 		"#!/bin/bash\n" + 
-		"cd " + release.rootFolder.fsPath + "\n" +
+		'cd "$(dirname "$0")"\n' + // cd to script directory
 		"cmsenv\n" +
 		"cd - > /dev/null\n" +
 		'exec "$LOCALRT/venv/$SCRAM_ARCH/bin/python3" "$@"\n'
-	))
-	// do chmod +x
-	let stat = await nodeFs.stat(pathToPythonCmsenv.fsPath)
-	let mode = stat.mode & 0xFFFF;
-    const x = nodeFs.constants.S_IXUSR | nodeFs.constants.S_IXGRP | nodeFs.constants.S_IXOTH;
-    mode |= x;
-	return nodeFs.chmod(pathToPythonCmsenv.fsPath, mode)
+	)
 }
 
 /**
@@ -308,7 +325,7 @@ export async function isPythonFullySetup(release:CmsRelease):Promise<boolean> {
 
 	let checkScramVenv = async () => {
 		try {
-			await vscode.workspace.fs.stat(vscode.Uri.joinPath(pathToScramVenv(release), release.scram_arch, "bin", "python3_cmsenv"))
+			await vscode.workspace.fs.stat(vscode.Uri.joinPath(pathToScramVenv(release), "bin", "python3_cmsenv"))
 			return true;
 		} catch (e) {
 			if (com.isENOENT(e))
@@ -319,22 +336,31 @@ export async function isPythonFullySetup(release:CmsRelease):Promise<boolean> {
 
 	let checkPythonConfig = async () => {
 		let pythonConfig = vscode.workspace.getConfiguration("python.analysis", workspaceFolderForRelease(release)) // python.analysis.include
-		const pythonConfigInclude = pythonConfig.get<string[]>("include")
-		if (pythonConfigInclude == undefined)
-			return false;
-		const prefix = vscode.workspace.asRelativePath(release.rootFolder, false) + "/"
-		for (const configVal of [prefix + ".vscode-cmssw/python", prefix+"cfipython", prefix + ".vscode-cmssw/cfipython"]) {
-			if (pythonConfigInclude.indexOf(configVal) == -1)
+
+		// CHeck that all values given are in the settings config key
+		let checkValuesAreInConfig = (key:string, values:string[]):boolean => {
+			const configValsInSettings = pythonConfig.get<string[]>(key)
+			if (configValsInSettings == undefined)
 				return false;
+			for (const configVal of values) {
+				if (configValsInSettings.indexOf(configVal) == -1)
+					return false;
+			}
+			return true;
 		}
-		return true;
+
+		const prefix = vscode.workspace.asRelativePath(release.rootFolder, false) + "/"
+		return checkValuesAreInConfig("extraPaths", [prefix + ".vscode-cmssw/cfipython", prefix + ".vscode-cmssw/python"]) 
+			&& checkValuesAreInConfig("exclude", [prefix + ".vscode-cmssw", prefix+"cfipython"]) 
 	}
 
 	let checkSymlinkFolders = async () => {
 		let promises = [getPythonSymlinkTreeFolder(release, CmsFileType.RegularPython, false), 
 			getPythonSymlinkTreeFolder(release, CmsFileType.CfiPython, false)].map(async (folder) => {
 			try {
-				if ((await vscode.workspace.fs.stat(await folder)).type == vscode.FileType.Directory)
+				const statRes = (await vscode.workspace.fs.stat(await folder)).type
+				// RegularPython will be Directory, CfiPython will be SymbolicLink to a directory
+				if (statRes == vscode.FileType.Directory || statRes == (vscode.FileType.Directory | vscode.FileType.SymbolicLink))
 					return true;
 				throw Error("Symlink folder " + (await folder).toString() + " should be a directory or non-existent.")
 			} catch (e) {
@@ -347,5 +373,7 @@ export async function isPythonFullySetup(release:CmsRelease):Promise<boolean> {
 	}
 	
 	let res = await Promise.all([checkScramVenv(), checkPythonConfig(), checkSymlinkFolders()])
+	console.log("isPythonFullySetup result")
+	console.log(res)
 	return (res[0] && res[1] && res[2])
 }

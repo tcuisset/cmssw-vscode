@@ -56,11 +56,6 @@ export class CmsRelease {
         return path.join("/cvmfs/cms.cern.ch/", this.scram_arch, "cms", "cmssw", this.cmssw_release)
     }
 
-    
-    /*toJSON():RawCmsRelease {
-        return {rootFolderRaw: this.rootFolder.path, scram_arch:this.scram_arch, cmssw_release:this.cmssw_release}
-    }*/
-
     /**
      * When CmsRelease object is stored into workspaceState, it is converted to JSON and all methods are lost (including the Uri)
      * So when reading back from workspaceState we may need to revive the object. FOr some reason, sometimes when reading back from workspaceState
@@ -198,15 +193,15 @@ export class ConfigManager {
 }
 
 /**
- * Removes from configValues the values that are in extensionValues
- * @param configValues 
- * @param extensionValues 
+ * Removes from array the values that are in valsToRemove
+ * @param array 
+ * @param valsToRemove 
  * @returns 
  */
-function removeOurValuesFromConfig(configValues:string[], extensionValues:string[]) {
+function removeFromArray(array:string[], valsToRemove:string[]) {
     let res = Array<string>();
-    for (const configVal of configValues) {
-        if (extensionValues.indexOf(configVal) === -1) {
+    for (const configVal of array) {
+        if (valsToRemove.indexOf(configVal) === -1) {
             res.push(configVal)
         }
     }
@@ -228,8 +223,11 @@ export function updateConfigKeepingTrack(config: vscode.WorkspaceConfiguration, 
 		configValues = new Array<string>();
 	}
 
-    let cleanedConfigValues = removeOurValuesFromConfig(configValues, configManager._values)
-    cleanedConfigValues.push(...valuesToAdd)
+    // Remove from the wp config the values that were previously added by the extension
+    let cleanedConfigValues = removeFromArray(configValues, configManager._values)
+    // Also don't add again values that might already be in the config but not managed by us
+    // But still register them as added by the extension (not ideal but probably best option)
+    cleanedConfigValues.push(...removeFromArray(valuesToAdd, cleanedConfigValues))
     
     return Promise.all([
         configManager.updateConfig(valuesToAdd),
@@ -290,4 +288,49 @@ export async function listCheckedOutPackages(release:CmsRelease):Promise<Package
 */
 async function getListOfExternalsForArch(scram_arch:string) : Promise<string[]> {
 	return nodeFs.readdir(path.join("/cvmfs", "cms.cern.ch", scram_arch, "external"))
+}
+
+/**
+ * Creates a symlink at linkPath pointing to target. If the link already exists, check that the target is identical.
+ * If target is identical, do nothing. If target is different, delete the link and recreate it to the new target
+ * @param target 
+ * @param linkPath 
+ * @throws only in case of unrecoverable error (such as symlink call fail with error != EEXIST, or unlink fail)
+ */
+export async function makeOrUpdateSymlink(target:string, linkPath:string) {
+    try {
+        await nodeFs.symlink(target, linkPath);
+        console.log("Wrote symlink from " + linkPath + " to " + target);
+    } catch (e) {
+        // Any further error here is not recoverable so no try block
+        if (e instanceof Error && "code" in e && e.code == "EEXIST") {
+            // Symlink already exists. Check it is correct
+            if (path.resolve(await nodeFs.readlink(linkPath)) === path.resolve(target))
+                return
+            else {
+                // recreate it
+                await nodeFs.unlink(linkPath);
+                await nodeFs.symlink(target, linkPath);
+            }
+        } else {
+            throw e // Weird error during symlink call
+        }
+    }
+}
+
+/**
+ * Create an executable script at given location (creates file and chmod +x)
+ * In case the file already exists, will replace its contents
+ * @param mkdir create intermediate directories
+ */
+export async function createExecutableScript(scriptPath:vscode.Uri, content:string, mkdir:boolean=true) {
+    if (mkdir)
+        await vscode.workspace.fs.createDirectory(scriptPath.with({path:path.dirname(scriptPath.path)}));
+    await vscode.workspace.fs.writeFile(scriptPath, new TextEncoder().encode(content))
+	// do chmod +x
+	let stat = await nodeFs.stat(scriptPath.fsPath)
+	let mode = stat.mode & 0xFFFF;
+    const x = nodeFs.constants.S_IXUSR | nodeFs.constants.S_IXGRP | nodeFs.constants.S_IXOTH;
+    mode |= x;
+	await nodeFs.chmod(scriptPath.fsPath, mode)
 }
