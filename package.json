@@ -1,7 +1,10 @@
 {
   "name": "cmssw-vscode",
-  "displayName": "cmssw-vscode",
-  "description": "Integrate CMSSW in VSCode",
+  "displayName": "CMSSW integration (CMS collaboration offline software)",
+  "description": "Integration of CMSSW (offline software of the CMS collaboration) into Visual Studio Code (Python virtual environment, code completion in Python and C++)",
+  "license": "MIT",
+  "keywords": ["cms", "cmssw"],
+  "icon": "./icons/CMSlogo_128.png",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.85.0"
@@ -10,7 +13,7 @@
     "Other"
   ],
   "activationEvents": [
-    "*"
+    "workspaceContains:**/.SCRAM/Environment"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -43,31 +46,14 @@
     "configuration": {
       "title": "CMSSW-VSCode",
       "properties": {
-        "cmssw.pythonPackagesToIndex": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "FWCore/ParameterSet"
-          ],
-          "description": "List of CMSSW packages to index python files"
-        },
-        "cmssw.pythonExternalsToIndex": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "List of CMSSW python externals to index (example : py3-tensorflow)"
-        }
       }
     },
     "terminal": {
       "profiles": [
         {
           "id": "cmssw-vscode.cmsenv-shell",
-          "title": "Run a bash shell with cmsenv"
+          "title": "Bash (cmsenv)",
+          "icon": "./icons/CMSlogo_128.svg"
         }
       ]
     },

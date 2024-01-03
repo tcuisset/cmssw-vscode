@@ -3,13 +3,14 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 
-import * as com from './common';
+import * as cms from './cmsRelease';
+import * as utils from "./utils";
 import * as cpp from './cpp'
 import * as py from './python'
 import { assert } from 'console';
 
 
-function cmsenvLauncherPath(release:com.CmsRelease) {
+function cmsenvLauncherPath(release:cms.CmsRelease) {
 	return vscode.Uri.joinPath(release.rootFolder, ".vscode-cmssw", "cmsenv_launcher.sh")
 }
 
@@ -17,8 +18,8 @@ function cmsenvLauncherPath(release:com.CmsRelease) {
  * Creates a cmsenv_launcher.sh file in .vscode-cmssw
  * @param release 
  */
-async function createCmsenvLauncher(release:com.CmsRelease) {
-	await com.createExecutableScript(cmsenvLauncherPath(release),
+async function createCmsenvLauncher(release:cms.CmsRelease) {
+	await utils.createExecutableScript(cmsenvLauncherPath(release),
 		"#!/bin/bash\n" +
 		'cd "$(dirname "$0")"\n' + // cd to script directory
 		"cmsenv\n" +
@@ -30,11 +31,11 @@ async function createCmsenvLauncher(release:com.CmsRelease) {
 /**
  * Path to the bash cmsenv launcher. The file has to be named bash so that the VSCode shell integration works automatically
  */
-function bashCmsenvLauncherPath(release:com.CmsRelease) {
+function bashCmsenvLauncherPath(release:cms.CmsRelease) {
 	return vscode.Uri.joinPath(release.rootFolder, ".vscode-cmssw", "cmsenv_launchers", "bash")
 }
-async function createBashCmsenvLauncher(release:com.CmsRelease) {
-	await com.createExecutableScript(bashCmsenvLauncherPath(release),
+async function createBashCmsenvLauncher(release:cms.CmsRelease) {
+	await utils.createExecutableScript(bashCmsenvLauncherPath(release),
 		"#!/bin/bash\n" +
 		'cd "$(dirname "$0")"\n' + // cd to script directory
 		"cmsenv\n" +
@@ -43,9 +44,9 @@ async function createBashCmsenvLauncher(release:com.CmsRelease) {
 	)
 }
 
-function makeTerminalProfile(release:com.CmsRelease):vscode.TerminalProfile {
+function makeTerminalProfile(release:cms.CmsRelease):vscode.TerminalProfile {
 	return new vscode.TerminalProfile( {name:release.cmssw_release,
-		shellPath:bashCmsenvLauncherPath(release).fsPath,
+		shellPath:bashCmsenvLauncherPath(release).fsPath
 		})
 }
 
@@ -54,11 +55,13 @@ function makeTerminalProfile(release:com.CmsRelease):vscode.TerminalProfile {
  * @param release 
  * @returns list out of ["python", "cpp"]. Empty is possible
  */
-async function listLanguagesToSetupInRelease(release:com.CmsRelease) : Promise<string[]> {
+async function listLanguagesToSetupInRelease(release:cms.CmsRelease) : Promise<string[]> {
 	let res = new Array<string>()
 	if (!await py.isPythonFullySetup(release))
 		res.push("python")
-	return res// TODO C++
+	if (!await cpp.isCppFullySetup(release))
+		res.push("cpp")
+	return res
 }
 
 
@@ -71,14 +74,15 @@ export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "cmssw-vscode" is now active!');
 	//console.log(context.storageUri)
 
-	com.setWorkspaceStorage(context.workspaceState)
+	cms.setWorkspaceStorage(context.workspaceState)
+	cms.setGlobalStorage(context.globalState)
 	/*
 	com.findCmsswReleases().then((releases) => {
 		console.log(com.listCheckedOutPackages(releases[0]))
 	})*/
 
 	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.buildPythonSymlinkTree', () => {
-		const rel = com.getCurrentRelease()
+		const rel = cms.getCurrentRelease()
 		if (rel !== undefined) {
 			py.buildPythonSymlinkTree(rel)
 			py.makeCfiPythonSymlink(rel)
@@ -86,10 +90,11 @@ export function activate(context: vscode.ExtensionContext) {
 	}))
 
 	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.updatePythonConfig', async () => {
-		const release = com.getCurrentRelease()
+		const release = cms.getCurrentRelease()
 		if (release !== undefined) {
 			try {
-				await py.updatePythonConfig(release, context.workspaceState, vscode.workspace.getConfiguration('cmssw').get('pythonExternalsToIndex', []))
+				await py.updatePythonConfig(release, context.workspaceState//, vscode.workspace.getConfiguration('cmssw').get('pythonExternalsToIndex', [])
+				)
 			} catch (e) {
 				console.log("Caught e")
 				console.log(e)
@@ -98,7 +103,7 @@ export function activate(context: vscode.ExtensionContext) {
 	}))
 
 	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.makeScramVenv', async () => {
-		const release = com.getCurrentRelease()
+		const release = cms.getCurrentRelease()
 		if (release !== undefined)
 			return py.makeVirtualEnvironment(release)
 		//return addScramVenvToSettings(release) // does not work yet
@@ -112,7 +117,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(vscode.window.registerTerminalProfileProvider("cmssw-vscode.cmsenv-shell", {
 		async provideTerminalProfile(token) {
-			const release = com.getCurrentRelease()
+			const release = cms.getCurrentRelease()
 			if (release !== undefined)	
 				return makeTerminalProfile(release)
 			else
@@ -120,14 +125,14 @@ export function activate(context: vscode.ExtensionContext) {
 		},
 	}))
 
-	context.subscriptions.push(com.onReleaseChange.event(async (e)=> {
+	context.subscriptions.push(cms.onReleaseChange.event(async (e)=> {
 		if (e.newRelease !== undefined) {
 			try {
 				const stat = await vscode.workspace.fs.stat(bashCmsenvLauncherPath(e.newRelease))
-				if (stat.type == vscode.FileType.File)
+				if (stat.type === vscode.FileType.File)
 					return
 			} catch (exc) {
-				if (com.isENOENT(exc))
+				if (utils.isENOENT(exc))
 					await createBashCmsenvLauncher(e.newRelease)
 				else
 					throw exc
@@ -135,11 +140,13 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	}))
 
+	cpp.setupCpptools().then((disp) => context.subscriptions.push(disp))
+
 	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.chooseCmsswWorkingArea', async () => {
-		const releases = await com.findCmsswReleases()
+		const releases = await cms.findCmsswReleases()
 		let displayStrings = new Array<string>()
 		for (const release of releases) {
-			displayStrings.push(com.userFriendlyReleaseLocation(release))
+			displayStrings.push(cms.userFriendlyReleaseLocation(release))
 		}
 		displayStrings.push("Disable")
 		// TODO add custom location option
@@ -153,10 +160,10 @@ export function activate(context: vscode.ExtensionContext) {
 			} else {
 				newReleaseChosen = releases[displayStrings.indexOf(qpResult)]
 			}
-			await com.setCurrentRelease(newReleaseChosen)
+			await cms.setCurrentRelease(newReleaseChosen)
 			if (newReleaseChosen === undefined)
 				return;
-			const newRelease = com.getCurrentRelease()
+			const newRelease = cms.getCurrentRelease()
 			if (newRelease === undefined) {
 				throw Error("Could not set release")
 			}
@@ -172,12 +179,12 @@ export function activate(context: vscode.ExtensionContext) {
 					let setupCpp = () => vscode.commands.executeCommand("cmssw-vscode.setupCpp")
 					if (pickRes === undefined)
 						return
-					else if (pickRes == "All") {
+					else if (pickRes === "All") {
 						setupPython()
 						setupCpp()
-					} else if (pickRes == "python") {
+					} else if (pickRes === "python") {
 						setupPython()
-					} else if (pickRes == "cpp") {
+					} else if (pickRes === "cpp") {
 						setupCpp()
 					} else {
 						assert(false)
@@ -193,18 +200,18 @@ export function activate(context: vscode.ExtensionContext) {
 
 	let statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
 	statusBar.command = "cmssw-vscode.chooseCmsswWorkingArea"
-	let updateStatusbarText = (release:com.CmsRelease|undefined) => {
+	let updateStatusbarText = (release:cms.CmsRelease|undefined) => {
 		if (release !== undefined) {
-			statusBar.text = com.userFriendlyReleaseLocation(release)
+			statusBar.text = cms.userFriendlyReleaseLocation(release)
 		} else {
 			statusBar.text = "No CMSSW release set"
 		}
 	}
-	updateStatusbarText(com.getCurrentRelease())
-	com.onReleaseChange.event((e:com.ReleaseChangeEvent) => updateStatusbarText(e.newRelease))
+	updateStatusbarText(cms.getCurrentRelease())
+	cms.onReleaseChange.event((e:cms.ReleaseChangeEvent) => updateStatusbarText(e.newRelease))
 	statusBar.show()
 	context.subscriptions.push(statusBar)
-	context.subscriptions.push(com.onReleaseChange)
+	context.subscriptions.push(cms.onReleaseChange)
 
 	//cpp.setupCpptools()
 
@@ -212,5 +219,5 @@ export function activate(context: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated
 export function deactivate() {
-	com.setWorkspaceStorage(undefined)
+	cms.setWorkspaceStorage(undefined)
 }
