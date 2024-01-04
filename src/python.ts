@@ -180,6 +180,11 @@ function pathToScramVenv(release:CmsRelease) {
 	return vscode.Uri.joinPath(release.rootFolder, "venv", release.scram_arch)
 }
 
+/** list of paths of files that were created for python by the CMSSW extension (to be used on cleanup). Does not include any file in .vscode-cmssw */
+export function pathsToDeleteOnCleanupRelease(release:CmsRelease) {
+	return [vscode.Uri.joinPath(pathToScramVenv(release), "bin", "python3_cmsenv")]
+}
+
 /**
  * Uses the python extension API to resolve the scram venv virtual environment
  * @param release 

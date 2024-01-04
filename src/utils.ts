@@ -2,16 +2,33 @@ import * as vscode from "vscode";
 import * as path from 'path';
 import * as nodeFs from 'node:fs/promises'
 
+let outputChannel:vscode.OutputChannel|undefined = undefined
+export function setOutputChannel(oc:vscode.OutputChannel|undefined) {
+    outputChannel = oc
+}
+
+export function logToOC(val:any) {
+    val = new String(val)
+    if (outputChannel !== undefined)
+        outputChannel.appendLine(val)
+    else
+        console.log(val)
+}
+
+export function errorNoReleaseSelected() {
+    vscode.window.showErrorMessage("Cannot run command since no CMSSW release is selected (select it using the status bar at the bottom right)")
+}
 
 /**
  * Returns true if the exception is ENOENT (file not found), false in all other cases
  * @param exception
  */
-
 export function isENOENT(exception: any): boolean {
     return (exception instanceof vscode.FileSystemError && exception.code === "FileNotFound");
     //|| (exception instanceof Error && "code" in exception && exception.code == "FileNotFound") 
-}export async function checkDirectoryExists(uri: vscode.Uri): Promise<boolean> {
+}
+
+export async function checkDirectoryExists(uri: vscode.Uri): Promise<boolean> {
     try {
         return (await vscode.workspace.fs.stat(uri)).type === vscode.FileType.Directory;
     } catch (e) {
@@ -20,6 +37,7 @@ export function isENOENT(exception: any): boolean {
         throw e;
     }
 }
+
 /**
  * Removes from array the values that are in valsToRemove
  * @param array
@@ -35,6 +53,7 @@ export function removeFromArray(array: string[], valsToRemove: string[]) {
     }
     return res;
 }
+
 /**
  * Update a workspace configuration key, keeping track in workspace storage of the values added by us
  * Values in config that were added by the extension previously but are no longer in valuesToAdd will be removed
@@ -44,7 +63,6 @@ export function removeFromArray(array: string[], valsToRemove: string[]) {
  * @param valuesToAdd the list of new values to replace in config
  * @returns
  */
-
 export function updateConfigKeepingTrack(config: vscode.WorkspaceConfiguration, key: string, configManager: ConfigManager, valuesToAdd: string[]): Thenable<any> {
     let configValues = config.get<string[]>(key);
     if (configValues === undefined) {
@@ -62,6 +80,7 @@ export function updateConfigKeepingTrack(config: vscode.WorkspaceConfiguration, 
         config.update(key, cleanedConfigValues, false)
     ]);
 }
+
 /**
  * Creates a symlink at linkPath pointing to target. If the link already exists, check that the target is identical.
  * If target is identical, do nothing. If target is different, delete the link and recreate it to the new target
@@ -69,7 +88,6 @@ export function updateConfigKeepingTrack(config: vscode.WorkspaceConfiguration, 
  * @param linkPath
  * @throws only in case of unrecoverable error (such as symlink call fail with error != EEXIST, or unlink fail)
  */
-
 export async function makeOrUpdateSymlink(target: string, linkPath: string) {
     try {
         await nodeFs.symlink(target, linkPath);
@@ -90,12 +108,12 @@ export async function makeOrUpdateSymlink(target: string, linkPath: string) {
         }
     }
 }
+
 /**
  * Create an executable script at given location (creates file and chmod +x)
  * In case the file already exists, will replace its contents
  * @param mkdir create intermediate directories
  */
-
 export async function createExecutableScript(scriptPath: vscode.Uri, content: string, mkdir: boolean = true) {
     if (mkdir)
         await vscode.workspace.fs.createDirectory(scriptPath.with({ path: path.dirname(scriptPath.path) }));

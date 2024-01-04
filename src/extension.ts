@@ -1,13 +1,11 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import * as path from 'path';
 
 import * as cms from './cmsRelease';
 import * as utils from "./utils";
 import * as cpp from './cpp'
 import * as py from './python'
-import { assert } from 'console';
 
 
 function cmsenvLauncherPath(release:cms.CmsRelease) {
@@ -80,34 +78,41 @@ export function activate(context: vscode.ExtensionContext) {
 	com.findCmsswReleases().then((releases) => {
 		console.log(com.listCheckedOutPackages(releases[0]))
 	})*/
+	let outputChannel = vscode.window.createOutputChannel("CMSSW")
+	context.subscriptions.push(outputChannel)
+	utils.setOutputChannel(outputChannel)
 
-	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.buildPythonSymlinkTree', () => {
+	let handleExceptionsInCommand = (fct:CallableFunction) => (() => {
+		try {
+			fct()
+		} catch (e) {
+			outputChannel.appendLine("ERROR : " + String(e))
+			vscode.window.showErrorMessage("CMSSW extension : an error ocurred :\n" + String(e))
+		}
+	})
+
+	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.buildPythonSymlinkTree', handleExceptionsInCommand(() => {
 		const rel = cms.getCurrentRelease()
 		if (rel !== undefined) {
 			py.buildPythonSymlinkTree(rel)
 			py.makeCfiPythonSymlink(rel)
 		}
-	}))
+	})))
 
-	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.updatePythonConfig', async () => {
+	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.updatePythonConfig', handleExceptionsInCommand(async () => {
 		const release = cms.getCurrentRelease()
 		if (release !== undefined) {
-			try {
-				await py.updatePythonConfig(release, context.workspaceState//, vscode.workspace.getConfiguration('cmssw').get('pythonExternalsToIndex', [])
+			await py.updatePythonConfig(release, context.workspaceState//, vscode.workspace.getConfiguration('cmssw').get('pythonExternalsToIndex', [])
 				)
-			} catch (e) {
-				console.log("Caught e")
-				console.log(e)
-			}
 		}
-	}))
+	})))
 
-	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.makeScramVenv', async () => {
+	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.makeScramVenv', handleExceptionsInCommand(async () => {
 		const release = cms.getCurrentRelease()
 		if (release !== undefined)
 			return py.makeVirtualEnvironment(release)
 		//return addScramVenvToSettings(release) // does not work yet
-	}))
+	})))
 
 	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.setupPython', async () => {
 		vscode.commands.executeCommand('cmssw-vscode.buildPythonSymlinkTree')
@@ -121,11 +126,12 @@ export function activate(context: vscode.ExtensionContext) {
 			if (release !== undefined)	
 				return makeTerminalProfile(release)
 			else
-				vscode.window.showErrorMessage("No CMSSW release selected. You need to select a release before opening a CMSSW cmsenv terminal")
+				vscode.window.showErrorMessage("CMSSW extension : No CMSSW release selected. You need to select a release (bottom right in status bar) before opening a CMSSW cmsenv terminal")
 		},
 	}))
 
 	context.subscriptions.push(cms.onReleaseChange.event(async (e)=> {
+		// Checking if we need to create a bash launcher for cmsenv terminal
 		if (e.newRelease !== undefined) {
 			try {
 				const stat = await vscode.workspace.fs.stat(bashCmsenvLauncherPath(e.newRelease))
@@ -140,9 +146,23 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	}))
 
+	// Don't await as it can take a long time
 	cpp.setupCpptools().then((disp) => context.subscriptions.push(disp))
 
-	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.chooseCmsswWorkingArea', async () => {
+	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.resetExtensionForCurrentRelease', handleExceptionsInCommand(async () => {
+		const release = cms.getCurrentRelease()
+		if (release === undefined) {
+			utils.errorNoReleaseSelected()
+			return
+		}
+		// Some of them may reject since files/folder may not exist
+		await Promise.allSettled([
+			vscode.workspace.fs.delete(vscode.Uri.joinPath(release.rootFolder, ".vscode-cmssw"), {recursive:true}),
+			py.pathsToDeleteOnCleanupRelease(release).map((path) => vscode.workspace.fs.delete(path))
+		])
+	})))
+
+	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.chooseCmsswWorkingArea', handleExceptionsInCommand(async () => {
 		const releases = await cms.findCmsswReleases()
 		let displayStrings = new Array<string>()
 		for (const release of releases) {
@@ -167,36 +187,36 @@ export function activate(context: vscode.ExtensionContext) {
 			if (newRelease === undefined) {
 				throw Error("Could not set release")
 			}
-			try {
-				let languagesToSetup = await listLanguagesToSetupInRelease(newRelease)
-				if (languagesToSetup.length > 0) {
-					if (languagesToSetup.length > 1)
-						languagesToSetup.push("All")
-					let pickRes = await  vscode.window.showInformationMessage(
-						"We detected that some lanuguages were not yet configured for VSCode in the current CMSSW languages. Do you wish to set them up ?",
-						...languagesToSetup)
-					let setupPython = () => vscode.commands.executeCommand("cmssw-vscode.setupPython")
-					let setupCpp = () => vscode.commands.executeCommand("cmssw-vscode.setupCpp")
-					if (pickRes === undefined)
-						return
-					else if (pickRes === "All") {
-						setupPython()
-						setupCpp()
-					} else if (pickRes === "python") {
-						setupPython()
-					} else if (pickRes === "cpp") {
-						setupCpp()
-					} else {
-						assert(false)
-					}
+			
+			let languagesToSetup = await listLanguagesToSetupInRelease(newRelease)
+			if (languagesToSetup.length > 0) {
+				if (languagesToSetup.length > 1)
+					languagesToSetup.push("All")
+				let pickRes = await  vscode.window.showInformationMessage(
+					"We detected that some lanuguages were not yet configured for VSCode in the current CMSSW languages. Do you wish to set them up ?",
+					...languagesToSetup)
+				let setupPython = () => vscode.commands.executeCommand("cmssw-vscode.setupPython")
+				let setupCpp = () => vscode.commands.executeCommand("cmssw-vscode.setupCpp")
+				let setupPromises:Thenable<unknown>[] = []
+				if (pickRes === undefined)
+					return
+				if (pickRes in ["All", "python"])
+					setupPromises.push(setupPython())
+				if (pickRes in ["All", "cpp"])
+					setupPromises.push(setupCpp())
+				let setupRes = await Promise.allSettled(setupPromises)
+				let rejectedPromises = setupRes.filter((res) => res.status === "rejected") as PromiseRejectedResult[]
+				if (rejectedPromises.length > 0) {
+					const excString = rejectedPromises.map((res) => res.reason).toString()
+					utils.logToOC("ERROR : could not setup languages for CMS release area " + newReleaseChosen.toString() + "\nDue to : " + excString)
+					const clearRes = await vscode.window.showErrorMessage("CMSSW : could not setup languages for CMSSW release area, due to " +excString + "\nYou can try clearing the extension state", "Clear")
+					if (clearRes === "Clear")
+						vscode.commands.executeCommand("cmssw-vscode.resetExtensionForCurrentRelease")
 					
 				}
-			} catch (e) {
-				throw e; //TODO here we should offer resetting the config
 			}
-			
 		}
-	}))
+	})))
 
 	let statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
 	statusBar.command = "cmssw-vscode.chooseCmsswWorkingArea"
@@ -212,12 +232,11 @@ export function activate(context: vscode.ExtensionContext) {
 	statusBar.show()
 	context.subscriptions.push(statusBar)
 	context.subscriptions.push(cms.onReleaseChange)
-
-	//cpp.setupCpptools()
-
 }
 
 // This method is called when your extension is deactivated
 export function deactivate() {
 	cms.setWorkspaceStorage(undefined)
+	cms.setGlobalStorage(undefined)
+	utils.setOutputChannel(undefined)
 }

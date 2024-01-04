@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from 'path';
 import * as nodeFs from 'node:fs/promises'
+import * as utils from './utils'
 
 // cfi python located at /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/cfipython/$SCRAM_ARCH/Pkg/SubPjg/thing_cfi.py
 // python located at /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/src/Pkg/SubPjg/python/thing.py
@@ -181,6 +182,11 @@ export async function setCurrentRelease(release:CmsRelease|undefined) {
 	onReleaseChange.fire({newRelease:release})
 }
 
+/**
+ * Retrives the currently selected CmsRelease
+ * @returns the selected release, or undefined in case none are selected
+ * @throws Error in case we could not determine the current release
+ */
 export function getCurrentRelease():CmsRelease|undefined {
     try {
         const rawRelease = workspaceStorage?.get<CmsRelease>("currentRelease")
@@ -189,15 +195,14 @@ export function getCurrentRelease():CmsRelease|undefined {
         try {
             return CmsRelease.revive(rawRelease)
         } catch (e) {
-            console.log("Could not revive CMSSW release from workspaceStorage (probably due to extension update). Will reset storage. Stored release was :")
-            console.log(rawRelease)
-            console.log("Exception whilst reviving was :")
-            console.log(e)
+            utils.logToOC("Could not revive CMSSW release from workspaceStorage (probably due to extension update). Will reset storage. Stored release was :")
+            utils.logToOC(rawRelease)
+            utils.logToOC("Exception whilst reviving was :")
+            utils.logToOC(e)
             setCurrentRelease(undefined);
         }   
     } catch (e) {
-        console.log("EROR : Could not access workspaceStorage to get CMSSW release due to : ")
-        console.log(e)
+        throw new Error("Could not access workspaceStorage to get CMSSW release", {cause:e})
     }
     return undefined
 }
