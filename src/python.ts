@@ -6,9 +6,8 @@ import { PythonExtension, VersionInfo, ResolvedVersionInfo } from '@vscode/pytho
 import * as cp from 'node:child_process'
 
 import { CmsRelease, workspaceFolderForRelease, Package, listCheckedOutPackages, getCurrentRelease } from './cmsRelease';
-import { ConfigManager } from "./utils";
-import { updateConfigKeepingTrack } from "./utils";
-import * as com from './cmsRelease'
+import { ConfigManager, updateConfigKeepingTrack } from "./utils";
+import * as cms from './cmsRelease'
 import * as utils from "./utils";
 
 enum CmsFileType {
@@ -120,7 +119,7 @@ export async function buildPythonSymlinkTree(release:CmsRelease) : Promise<void>
 
     const localPkgs = new Set(await listCheckedOutPackages(release))
     //let cvmfsPkgs = pythonPkgsToIndexFromConfig()
-	let cvmfsPkgs = await com.listPackagesOnCvmfsFromCache(release)
+	let cvmfsPkgs = await cms.listPackagesOnCvmfsFromCache(release)
     cvmfsPkgs = cvmfsPkgs.filter( x => !localPkgs.has(x) ); // remove from cvmfs pkgs those that are locally checked out
 
 
@@ -225,38 +224,6 @@ export async function updatePythonConfig(release:CmsRelease, store:vscode.Mement
 	return Promise.allSettled(promises)
 }
 
-// Old code for external exclude (does not work due to pylance ignoring it)
-	/*
-	
-	// /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/python
-	// /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/lib/el8_amd64_gcc12
-	// /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/coral/CORAL_2_3_21-28dabfc38a6bf00dd35728bb54daa6e2/el8_amd64_gcc12/python
-	// /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/coral/CORAL_2_3_21-28dabfc38a6bf00dd35728bb54daa6e2/el8_amd64_gcc12/lib
-	
-	const cvmfsPrefix = path.join("/cvmfs", "cms.cern.ch", release.scram_arch)
-	// Prevent access of python packages on CVMFS as they use __init__ magic that does not work with pylance
-	// We want to use our symlink tree instead, so exclude the paths
-	let excludePaths = [
-		path.join(release.cvmfsPath(), "python"),
-		path.join(release.cvmfsPath(), "lib", release.scram_arch),
-		path.join(cvmfsPrefix, "cms", "coral", "*", release.scram_arch, "python"),
-		path.join(cvmfsPrefix, "cms", "coral", "*", release.scram_arch, "lib", release.scram_arch),
-	]
-
-	const pythonVersion = (await pythonEnvironment)?.version
-	if (pythonVersion == undefined) {
-		throw Error("Could not determine the python version. Environment is " +(await pythonEnvironment)?.toString())
-	}
-	
-	// /cvmfs/cms.cern.ch/el8_amd64_gcc12/external/py3-tensorflow/2.12.0-b1d544bcde4b10a0c0da88f060f65dc9/lib/python3.9/site-packages
-	for (let external of await getPythonExternalsForRelease(release, parsePythonVersionToCmssw(pythonVersion))) {
-		if (keepExternals.indexOf(external.name) == -1) {
-			excludePaths.push(external.path)
-		}
-	}
-	promises.push(updateConfigKeepingTrack(pythonConfig, "exclude", new ConfigManager("workspaceConfig.python.analysis.exclude", store), excludePaths)) 
-	*/
-
 
 /**
  * Run scram-venv if needed, then make a python executable that runs cmsenv then python
@@ -289,25 +256,6 @@ export async function makeVirtualEnvironment(release:CmsRelease, forceRecreate:b
 		'exec "$LOCALRT/venv/$SCRAM_ARCH/bin/python3" "$@"\n'
 	)
 }
-
-/**
- * Add to python config so that the virtual environment from scram if found. Does not work for now as python.venvFolders does not exist at workspace level
- * @param release 
- */
-/*
-async function addScramVenvToSettings(release:CmsRelease) {
-	let pythonConfig = vscode.workspace.getConfiguration("python", workspaceFolderForRelease(release)) // python.analysis.include
-	const configKey = "venvFolders"
-	let pythonConfigVenvFolders = pythonConfig.get<string[]>(configKey)
-	if (pythonConfigVenvFolders === undefined) {
-		pythonConfigVenvFolders = new Array<string>()
-	}
-	const pathToAdd = path.join("${workspaceFolder}", vscode.workspace.asRelativePath(release.rootFolder, false), "venv", release.scram_arch) 
-	if (pythonConfigVenvFolders.indexOf(pathToAdd) === -1) {
-		pythonConfigVenvFolders.push(pathToAdd)
-		await pythonConfig.update(configKey, pythonConfigVenvFolders, false)
-	}
-}*/
 
 
 
