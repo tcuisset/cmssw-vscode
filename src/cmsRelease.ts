@@ -268,7 +268,7 @@ export async function listCheckedOutPackages(release:CmsRelease):Promise<Package
  * Finds all packages for the current release that are on cvmfs
  */
 export async function listPackagesOnCvmfs(release:CmsRelease) : Promise<Package[]> {
-    return findPackagesInFolder(release.cvmfsPath())
+    return findPackagesInFolder(path.join(release.cvmfsPath(), "src"))
 }
 
 
