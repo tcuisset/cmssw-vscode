@@ -37,88 +37,77 @@ function pythonPkgsToIndexFromConfig() : Package[] {
  * @param mkdir if true, will create the dir if it does not exist. if false, it will return the path but the dir may not exist
  * @returns 
  */
-async function getPythonSymlinkTreeFolder(release:CmsRelease, fileType:CmsFileType, mkdir=true)  : Promise<vscode.Uri>  {
-	let folderName = "";
-	if (fileType === CmsFileType.RegularPython) {
-		folderName = "python";
-	} else if (fileType === CmsFileType.CfiPython) {
-		folderName = "cfipython";
-	} else
-		throw Error("Not supported yet")
-    try {
-		let pySymlinkTreeBasePath = vscode.Uri.joinPath(release.rootFolder, ".vscode-cmssw", folderName);
-		if (mkdir) {
-			try {
-				// Does not raise even when directory already exists
-				await vscode.workspace.fs.createDirectory(pySymlinkTreeBasePath);
-			} catch (e) {
-				console.log(e)
-				throw Error("Could not create python symlink tree directory at path " + pySymlinkTreeBasePath.toString())
-			}
+async function getPythonSymlinkTreeFolder(release:CmsRelease,  mkdir=true)  : Promise<vscode.Uri>  {
+	let folderName = "python";
+	let pySymlinkTreeBasePath = vscode.Uri.joinPath(release.rootFolder, ".vscode-cmssw", folderName);
+	if (mkdir) {
+		try {
+			// Does not raise even when directory already exists
+			await vscode.workspace.fs.createDirectory(pySymlinkTreeBasePath);
+		} catch (e) {
+			throw Error("Could not create python symlink tree directory at path " + pySymlinkTreeBasePath.toString(), {cause:e})
 		}
-		return pySymlinkTreeBasePath;
-    } catch (e) {
-        console.log(e)
-        throw e
-    }
-
+	}
+	return pySymlinkTreeBasePath;
 }
 
 /**
- * Build a symbolic link for PYthon
+ * Build a symbolic link for PYthon, folder mode
  * @param release 
  * @param symlinkTreeBase vscode Uri to the base folder of python symlinks in the release
  * @param pkg the package to create a symlink for
  * @param linkTargetType link target to local release or to CVMFS
+ * @throws in case of unrecoverable error (does not throw in case link already exists)
  */
-async function buildSinglePythonSymlink(release:CmsRelease, symlinkTreeBase:vscode.Uri, pkg:Package, linkTargetType:LinkTarget) {
-    // Create link directory
-    const linkPathBase = path.join(symlinkTreeBase.fsPath, pkg.subsystem);
-    const linkPath = path.join(linkPathBase, pkg.packageName)
+async function buildSinglePythonSymlinkForPackage(release:CmsRelease, symlinkTreeBase:vscode.Uri, pkg:Package, linkTargetType:LinkTarget) {
+    // Create package directory in symlink folder
+    const linkPackagePath = path.join(symlinkTreeBase.fsPath, pkg.subsystem, pkg.packageName);
     try {
-        await nodeFs.mkdir(linkPathBase, {recursive:true});
+        await nodeFs.mkdir(linkPackagePath, {recursive:true});
     } catch (e) {
         if (!utils.isENOENT(e)) {
-            console.log("Could not create folder " + linkPathBase + " due to ");
-            console.log(e);
-            throw e;
+            throw Error("Python symlink creation : Could not create folder " + linkPackagePath, {cause:e});
         }
         // folder already exists : not a problem normally
     }
-    let target:string;
-    // Create link itself
+
+	/** Path to package python folder to link to */
+	let targetPackagePythonDir:string;
+	/** Path to package cfipythpn folder */
+	let targetPackageCfiDir:string;
     if (linkTargetType === LinkTarget.Local) {
-        target = vscode.Uri.joinPath(release.rootFolder, "src", pkg.subsystem, pkg.packageName, "python").fsPath
+        targetPackagePythonDir = vscode.Uri.joinPath(release.rootFolder, "src", pkg.subsystem, pkg.packageName, "python").fsPath
+		targetPackageCfiDir = vscode.Uri.joinPath(release.rootFolder, "cfipython", pkg.subsystem, pkg.packageName, "python").fsPath
     } else if (linkTargetType === LinkTarget.CVMFS) {
         // python located at /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/src/Pkg/SubPjg/python/thing.py
-        target = path.join(release.cvmfsPath(), "src", pkg.subsystem, pkg.packageName, "python")
+        targetPackagePythonDir = path.join(release.cvmfsPath(), "src", pkg.subsystem, pkg.packageName,  "python")
+		targetPackageCfiDir = path.join(release.cvmfsPath(), "cfipython", release.scram_arch, pkg.subsystem, pkg.packageName)
     } else {
         throw new Error("Unkwown link target type")
     }
-    
-	// Making the symlink
-	let makeSymlinkFct = async () => {
+
+	/** Helper for making a symlink */
+	let makeSymlinkFct = async (target:string, linkPath:string) => {
 		try {
 			await utils.makeOrUpdateSymlink(target, linkPath)
-			console.log("Wrote symlink from " + linkPath + " to " + target);
+			//console.log("Wrote symlink from " + linkPath + " to " + target);
 		} catch (e) {
-			console.log("Could not create symlink from " + linkPath + " to " + target + " due to ");
-			console.log(e);
-			throw Error("Could not create symlink from " + linkPath + " to " + target + " due to " + e?.toString())
-		}
-	}
-	// Creating an __init__.py file so pylance will think it's a package 
-	let makeInitFct = async () => {
-		let initFileHandle;
-		try {
-			// Todo check if file already exists
-			initFileHandle = await nodeFs.open(path.join(linkPathBase, "__init__.py"), "w")
-		}  finally {
-			await initFileHandle?.close()
+			throw Error("Could not create symlink from " + linkPath + " to " + target, {cause:e})
 		}
 	}
 
-	await Promise.all([makeSymlinkFct(), makeInitFct()])
+	let makeSymlinksForAllFilesInFolder = async (folder:string) => {
+		const filesInTarget = await nodeFs.readdir(folder)
+		let promises:Promise<any>[] = []
+		for (const file of filesInTarget) {
+			if (file.endsWith(".py") || (file !== "__pycache__" && file !== ".scram")) { // sometimes there are nested folders
+				promises.push(makeSymlinkFct(path.join(folder, file), path.join(linkPackagePath, file)))
+			}
+		}
+		return Promise.all(promises)
+	}
+
+	await Promise.all([makeSymlinksForAllFilesInFolder(targetPackagePythonDir), makeSymlinksForAllFilesInFolder(targetPackageCfiDir)])
 }
 
 /**
@@ -127,24 +116,19 @@ async function buildSinglePythonSymlink(release:CmsRelease, symlinkTreeBase:vsco
  * @param release 
  */
 export async function buildPythonSymlinkTree(release:CmsRelease) : Promise<void> {
-	const symlinkTreeBase = await getPythonSymlinkTreeFolder(release, CmsFileType.RegularPython);
+	const symlinkTreeBase = await getPythonSymlinkTreeFolder(release);
 
     const localPkgs = new Set(await listCheckedOutPackages(release))
     //let cvmfsPkgs = pythonPkgsToIndexFromConfig()
 	let cvmfsPkgs = await com.listPackagesOnCvmfsFromCache(release)
     cvmfsPkgs = cvmfsPkgs.filter( x => !localPkgs.has(x) ); // remove from cvmfs pkgs those that are locally checked out
 
-    const promisesRes = [...localPkgs].map((pkg:Package) => buildSinglePythonSymlink(release, symlinkTreeBase, pkg, LinkTarget.Local))
-    promisesRes.push(...cvmfsPkgs.map((pkg:Package) => buildSinglePythonSymlink(release, symlinkTreeBase, pkg, LinkTarget.CVMFS)))
+
+    const promisesRes = [...localPkgs].map((pkg:Package) => buildSinglePythonSymlinkForPackage(release, symlinkTreeBase, pkg, LinkTarget.Local))
+    promisesRes.push(...cvmfsPkgs.map((pkg:Package) => buildSinglePythonSymlinkForPackage(release, symlinkTreeBase, pkg, LinkTarget.CVMFS)))
     await Promise.allSettled(promisesRes)
 }
 
-export async function makeCfiPythonSymlink(release:CmsRelease) : Promise<void> {
-	const symlinkTreeBase = await getPythonSymlinkTreeFolder(release, CmsFileType.CfiPython, false);
-	// cfi python located at /cvmfs/cms.cern.ch/el8_amd64_gcc12/cms/cmssw/CMSSW_14_0_0_pre1/cfipython/$SCRAM_ARCH/Pkg/SubPjg/thing_cfi.py
-	const target = path.join(release.cvmfsPath(), "cfipython", release.scram_arch)
-	await utils.makeOrUpdateSymlink(target, symlinkTreeBase.fsPath)
-}
 
 
 
@@ -230,7 +214,7 @@ export async function updatePythonConfig(release:CmsRelease, store:vscode.Mement
 	// "CMSSW_14_0_0_pre1/.vscode-cmssw/cfipython",
     //     "CMSSW_14_0_0_pre1/.vscode-cmssw/python"
 	promises.push(updateConfigKeepingTrack(pythonConfig, "extraPaths", new ConfigManager("workspaceConfig.python.analysis.extraPaths", store),
-		[prefix + ".vscode-cmssw/cfipython", prefix + ".vscode-cmssw/python"]))
+		[prefix + ".vscode-cmssw/python"]))
 	
 	promises.push(updateConfigKeepingTrack(pythonConfig, "exclude", new ConfigManager("workspaceConfig.python.analysis.exclude", store),
 		[prefix + ".vscode-cmssw", prefix + "cfipython"]))
@@ -366,8 +350,8 @@ export async function isPythonFullySetup(release:CmsRelease):Promise<boolean> {
 	}
 
 	let checkSymlinkFolders = async () => {
-		let promises = [getPythonSymlinkTreeFolder(release, CmsFileType.RegularPython, false), 
-			getPythonSymlinkTreeFolder(release, CmsFileType.CfiPython, false)].map(async (folder) => {
+		let promises = [
+			getPythonSymlinkTreeFolder(release, false)].map(async (folder) => {
 			try {
 				const statRes = (await vscode.workspace.fs.stat(await folder)).type
 				// RegularPython will be Directory, CfiPython will be SymbolicLink to a directory

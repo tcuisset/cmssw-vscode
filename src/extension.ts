@@ -95,7 +95,6 @@ export function activate(context: vscode.ExtensionContext) {
 		const rel = cms.getCurrentRelease()
 		if (rel !== undefined) {
 			py.buildPythonSymlinkTree(rel)
-			py.makeCfiPythonSymlink(rel)
 		}
 	})))
 
@@ -200,9 +199,9 @@ export function activate(context: vscode.ExtensionContext) {
 				let setupPromises:Thenable<unknown>[] = []
 				if (pickRes === undefined)
 					return
-				if (pickRes in ["All", "python"])
+				if (["All", "python"].includes(pickRes))
 					setupPromises.push(setupPython())
-				if (pickRes in ["All", "cpp"])
+				if (["All", "cpp"].includes(pickRes))
 					setupPromises.push(setupCpp())
 				let setupRes = await Promise.allSettled(setupPromises)
 				let rejectedPromises = setupRes.filter((res) => res.status === "rejected") as PromiseRejectedResult[]
