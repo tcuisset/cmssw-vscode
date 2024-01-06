@@ -1,6 +1,8 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { promisify } from 'node:util';
+import * as cp from 'node:child_process'
 
 import * as cms from './cmsRelease';
 import * as utils from "./utils";
@@ -76,6 +78,16 @@ export function activate(context: vscode.ExtensionContext) {
 	const outputChannel = vscode.window.createOutputChannel("CMSSW")
 	context.subscriptions.push(outputChannel)
 	utils.setOutputChannel(outputChannel)
+
+	outputChannel.appendLine("CMSSW extension is activating...")
+
+	// Checking for cmsset
+	cp.exec("which scramv1", (error) => {
+		if (error !== null) {
+			void vscode.window.showErrorMessage("CMSSW : the extension was not able to run 'cmsenv'. Ensure that you have 'source /cvmfs/cms.cern.ch/cmsset_default.sh' in your .bashrc. This needs to be on the SSH remote host (lxplus, ...)  or the docker container as applicable.")
+			outputChannel.appendLine("Running 'which scramv1' failed due to " + JSON.stringify(error))
+		}
+	})
 
 	const handleExceptionsInCommand = (fct:(...args: unknown[]) => unknown):(...args: unknown[]) => unknown => (async () => {
 		try {
