@@ -38,6 +38,10 @@ export class CmsReleaseBase {
     cvmfsPath():string {
         return path.join("/cvmfs/cms.cern.ch/", this.scram_arch, "cms", "cmssw", this.cmssw_release)
     }
+
+    toString():string {
+        return "CmsBaseRelease("+this.cmssw_release+", arch=" + this.scram_arch + ")"
+    }
 }
 
 /**
@@ -57,10 +61,12 @@ export class CmsRelease extends CmsReleaseBase {
      * So when reading back from workspaceState we may need to revive the object. FOr some reason, sometimes when reading back from workspaceState
      * the object is already alive.
      */
-    static revive(obj:CmsRelease|any):CmsRelease {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    static revive(obj:any):CmsRelease {
         if ("cvmfsPath" in obj)
-            return obj
+            return obj as CmsRelease
         else
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
             return new CmsRelease(vscode.Uri.file(obj.rootFolder.path), obj.scram_arch, obj.cmssw_release)
     }
 
@@ -68,7 +74,7 @@ export class CmsRelease extends CmsReleaseBase {
     static async fromBaseUri(releasePath:vscode.Uri):Promise<CmsRelease> {
         const entriesInDotScram = await vscode.workspace.fs.readDirectory(releasePath.with({path: releasePath.path + "/.SCRAM"}))
 		let scram_arch:string|null = null
-		for (var [entryInDotScram_path, entryInDotScram_fileType] of entriesInDotScram) {
+		for (const [entryInDotScram_path, entryInDotScram_fileType] of entriesInDotScram) {
 			if (entryInDotScram_fileType === vscode.FileType.Directory) {
 				scram_arch = entryInDotScram_path
 				break;
@@ -96,7 +102,7 @@ export class CmsRelease extends CmsReleaseBase {
                 return new CmsReleaseBase(splitPath[3], splitPath[6])
         } else {
             // Local path : walk up directories trying to find .SCRAM folder
-            let promises:Promise<string|undefined>[] = []
+            const promises:Promise<string|undefined>[] = []
             let parentsPath = uri.path
             while (path.dirname(parentsPath) !== parentsPath) {
                 promises.push((async (parentsPathLocal:string) => {
@@ -104,16 +110,20 @@ export class CmsRelease extends CmsReleaseBase {
                         return parentsPathLocal
                     else
                         throw new Error()
-                })(parentsPath).catch((e)=>undefined)) // Avoid rejected promise errors
+                })(parentsPath).catch(()=>undefined)) // Avoid rejected promise errors
                 parentsPath = path.dirname(parentsPath)
             }
-            for (let promise of promises) {
-                let path = await promise
+            for (const promise of promises) {
+                const path = await promise
                 if (path !== undefined)
                     return CmsRelease.fromBaseUri(uri.with({path:path}))
             }
         }
         throw new Error("Could not find CMSSW release for file : " + uri.toString())
+    }
+
+    toString() {
+        return "CmsRelease("+this.cmssw_release+", base=" + this.rootFolder.toString() + ")"
     }
 }
 
@@ -127,14 +137,14 @@ export async function resolveBaseRelease(base:CmsReleaseBase):Promise<CmsRelease
         if (release.cmssw_release === base.cmssw_release)
             return release
     }
-    throw new Error("Could not resolve cvmfs release " + base + " to a local release")
+    throw new Error("Could not resolve cvmfs release " + base.toString() + " to a local release")
 }
 
 let cmsswReleaseCache:CmsRelease[] = []
 export async function findCmsswReleases() : Promise<CmsRelease[]> {
 	const releasesPaths = await vscode.workspace.findFiles('**/.SCRAM/Environment', null,  10);
-	let res:CmsRelease[] = Array();
-	for (var releasePath of releasesPaths) {
+	const res:CmsRelease[] = []
+	for (const releasePath of releasesPaths) {
 		const rootFolder = releasePath.with({path: path.dirname(path.dirname(releasePath.path))}) // Go up twice in directory chain
         try {
             res.push(await CmsRelease.fromBaseUri(rootFolder))
@@ -152,7 +162,7 @@ export interface ReleaseChangeEvent {
 	//oldRelease:CmsRelease
 	newRelease:CmsRelease|undefined
 }
-export let onReleaseChange = new vscode.EventEmitter<ReleaseChangeEvent>()
+export const onReleaseChange = new vscode.EventEmitter<ReleaseChangeEvent>()
 
 
 export function userFriendlyReleaseLocation(release:CmsRelease):string {
@@ -199,7 +209,8 @@ export function getCurrentRelease():CmsRelease|undefined {
             utils.logToOC(rawRelease)
             utils.logToOC("Exception whilst reviving was :")
             utils.logToOC(e)
-            setCurrentRelease(undefined);
+            setCurrentRelease(undefined).catch(() => { // do nothing. TODO 
+            })
         }   
     } catch (e) {
         throw new Error("Could not access workspaceStorage to get CMSSW release", {cause:e})
@@ -220,7 +231,7 @@ export function getCurrentRelease():CmsRelease|undefined {
 async function findPackagesInFolder(folder:string):Promise<Package[]> {
     const subsystems = await nodeFs.readdir(folder)
 	// List of promises for each subsystem, holding an array of promises of packages
-	let promisedResults = subsystems.map(async (subsystem) => {
+	const promisedResults = subsystems.map(async (subsystem) => {
         if (subsystem.startsWith("."))
             return undefined // Remove .git and other things
         try {
@@ -240,12 +251,12 @@ async function findPackagesInFolder(folder:string):Promise<Package[]> {
         }
 	})
     // Now flatten and await all promises
-	let packages = new Array<Package>()
-	for (let subsystemPromise of promisedResults) {
-		let subsystemPromiseRes = await subsystemPromise
+	const packages = new Array<Package>()
+	for (const subsystemPromise of promisedResults) {
+		const subsystemPromiseRes = await subsystemPromise
 		if (subsystemPromiseRes !== undefined) {
-			for (let pkgPromise of subsystemPromiseRes) {
-				let pkgPromiseRes = await pkgPromise
+			for (const pkgPromise of subsystemPromiseRes) {
+				const pkgPromiseRes = await pkgPromise
 			
 				if (pkgPromiseRes !== undefined) {
 					packages.push(pkgPromiseRes)
@@ -277,19 +288,19 @@ export async function listPackagesOnCvmfs(release:CmsRelease) : Promise<Package[
  */
 export async function listPackagesOnCvmfsFromCache(release:CmsRelease):Promise<Package[]> {
     const cacheKey = "cvmfs-packages"
-    type CvmfsPackageStore = { [cmssw_release:string]:Package[] }
+    type CvmfsPackageStore = Record<string, Package[]> // Key is cmssw_release
     let cachedStore:CvmfsPackageStore|undefined;
     if (globalStorage !== undefined) {
         cachedStore = globalStorage.get<CvmfsPackageStore>(cacheKey)
-        if (cachedStore !== undefined && cachedStore[release.cmssw_release] !== undefined)
+        if (cachedStore?.[release.cmssw_release] !== undefined)
             return cachedStore[release.cmssw_release]
     }
-    let computedValue = await listPackagesOnCvmfs(release)
+    const computedValue = await listPackagesOnCvmfs(release)
     if (globalStorage !== undefined) {
         if (cachedStore === undefined)
             cachedStore = {};
         cachedStore[release.cmssw_release] = computedValue
-        globalStorage.update(cacheKey, cachedStore)
+        await globalStorage.update(cacheKey, cachedStore)
     }
     return computedValue
 }

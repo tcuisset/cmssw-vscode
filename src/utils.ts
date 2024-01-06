@@ -7,25 +7,29 @@ export function setOutputChannel(oc:vscode.OutputChannel|undefined) {
     outputChannel = oc
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function logToOC(val:any) {
     val = new String(val)
     if (outputChannel !== undefined)
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
         outputChannel.appendLine(val)
     else
         console.log(val)
 }
 
 export function errorNoReleaseSelected() {
-    vscode.window.showErrorMessage("Cannot run command since no CMSSW release is selected (select it using the status bar at the bottom right)")
+    void vscode.window.showErrorMessage("Cannot run command since no CMSSW release is selected (select it using the status bar at the bottom right)")
 }
 
 /**
  * Returns true if the exception is ENOENT (file not found), false in all other cases
  * @param exception
  */
-export function isENOENT(exception: any): boolean {
-    return (exception instanceof vscode.FileSystemError && exception.code === "FileNotFound");
-    //|| (exception instanceof Error && "code" in exception && exception.code == "FileNotFound") 
+export function isENOENT(exception: unknown): boolean {
+    return (
+        (exception instanceof vscode.FileSystemError && exception.code === "FileNotFound") // unsing vscode API
+        || (exception instanceof Error && "code" in exception && exception.code === "ENOENT") // using nodejs API (readFile)
+    );
 }
 
 export async function checkDirectoryExists(uri: vscode.Uri): Promise<boolean> {
@@ -45,7 +49,7 @@ export async function checkDirectoryExists(uri: vscode.Uri): Promise<boolean> {
  * @returns
  */
 export function removeFromArray(array: string[], valsToRemove: string[]) {
-    let res = Array<string>();
+    const res = Array<string>();
     for (const configVal of array) {
         if (valsToRemove.indexOf(configVal) === -1) {
             res.push(configVal);
@@ -63,14 +67,14 @@ export function removeFromArray(array: string[], valsToRemove: string[]) {
  * @param valuesToAdd the list of new values to replace in config
  * @returns
  */
-export function updateConfigKeepingTrack(config: vscode.WorkspaceConfiguration, key: string, configManager: ConfigManager, valuesToAdd: string[]): Thenable<any> {
+export function updateConfigKeepingTrack(config: vscode.WorkspaceConfiguration, key: string, configManager: ConfigManager, valuesToAdd: string[]): Thenable<unknown> {
     let configValues = config.get<string[]>(key);
     if (configValues === undefined) {
         configValues = new Array<string>();
     }
 
     // Remove from the wp config the values that were previously added by the extension
-    let cleanedConfigValues = removeFromArray(configValues, configManager._values);
+    const cleanedConfigValues = removeFromArray(configValues, configManager._values);
     // Also don't add again values that might already be in the config but not managed by us
     // But still register them as added by the extension (not ideal but probably best option)
     cleanedConfigValues.push(...removeFromArray(valuesToAdd, cleanedConfigValues));
@@ -114,12 +118,12 @@ export async function makeOrUpdateSymlink(target: string, linkPath: string) {
  * In case the file already exists, will replace its contents
  * @param mkdir create intermediate directories
  */
-export async function createExecutableScript(scriptPath: vscode.Uri, content: string, mkdir: boolean = true) {
+export async function createExecutableScript(scriptPath: vscode.Uri, content: string, mkdir = true) {
     if (mkdir)
         await vscode.workspace.fs.createDirectory(scriptPath.with({ path: path.dirname(scriptPath.path) }));
     await vscode.workspace.fs.writeFile(scriptPath, new TextEncoder().encode(content));
     // do chmod +x
-    let stat = await nodeFs.stat(scriptPath.fsPath);
+    const stat = await nodeFs.stat(scriptPath.fsPath);
     let mode = stat.mode & 65535;
     const x = nodeFs.constants.S_IXUSR | nodeFs.constants.S_IXGRP | nodeFs.constants.S_IXOTH;
     mode |= x;

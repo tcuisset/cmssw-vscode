@@ -5,6 +5,7 @@ This extension provides support for CMSSW, the software framework of the CMS exp
 ## Features
 
  - Creation of a Python virtual environment, so you can run notebooks in a CMSSW environment straight from VSCode, without any complicated setup. 
+ - Opening terminals with cmsenv running automatically
  - Automatic completion (Pylance) in Python files (an notebooks). Works for CMSSW packages, local ones and externals (such as ROOT, tensorflow, etc)
  - Automatic completion (Intellisense) in C++ files.
 
@@ -17,19 +18,10 @@ The extension will activate if you have a CMSSW release area in your workspace.
 Python and C++ VSCode extensions are required (they should be automatically installed when you install this extension)
 
 ## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+None for now
 
 ## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
+C++ autocompletion is still work-in-progress. In particular, it does not work properly for newly created packages that do not exist in the release.
 
 ## Release Notes
 

@@ -1,6 +1,6 @@
 {
   "name": "cmssw-vscode",
-  "displayName": "CMSSW integration (CMS collaboration offline software)",
+  "displayName": "CMSSW integration extension",
   "description": "Integration of CMSSW (offline software of the CMS collaboration) into Visual Studio Code (Python virtual environment, code completion in Python and C++)",
   "license": "MIT",
   "keywords": ["cms", "cmssw"],
@@ -12,6 +12,10 @@
   "categories": [
     "Other"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tcuisset/cmssw-vscode.git"
+  },
   "activationEvents": [
     "workspaceContains:**/.SCRAM/Environment"
   ],
@@ -41,6 +45,10 @@
       {
         "command": "cmssw-vscode.chooseCmsswWorkingArea",
         "title": "Choose the current CMSSW working area"
+      },
+      {
+        "command": "cmssw-vscode.resetExtensionForCurrentRelease",
+        "title": "Clear all files created by the extension in the CMSSW release area"
       }
     ],
     "configuration": {
@@ -53,7 +61,7 @@
         {
           "id": "cmssw-vscode.cmsenv-shell",
           "title": "Bash (cmsenv)",
-          "icon": "./icons/CMSlogo_128.svg"
+          "icon": "$(cms-icon)"
         }
       ]
     },
@@ -66,7 +74,16 @@
           "python.embedded.cpp": "cpp"
         }
       }
-    ]
+    ],
+    "icons": {
+      "cms-icon": {
+        "description": "CMS",
+        "default": {
+          "fontPath": "./icons/cmsIcons.woff",
+          "fontCharacter": "\\e900"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

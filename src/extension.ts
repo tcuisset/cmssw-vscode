@@ -16,6 +16,7 @@ function cmsenvLauncherPath(release:cms.CmsRelease) {
  * Creates a cmsenv_launcher.sh file in .vscode-cmssw
  * @param release 
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function createCmsenvLauncher(release:cms.CmsRelease) {
 	await utils.createExecutableScript(cmsenvLauncherPath(release),
 		"#!/bin/bash\n" +
@@ -44,7 +45,8 @@ async function createBashCmsenvLauncher(release:cms.CmsRelease) {
 
 function makeTerminalProfile(release:cms.CmsRelease):vscode.TerminalProfile {
 	return new vscode.TerminalProfile( {name:release.cmssw_release,
-		shellPath:bashCmsenvLauncherPath(release).fsPath
+		shellPath:bashCmsenvLauncherPath(release).fsPath,
+		iconPath:new vscode.ThemeIcon("cms-icon")
 		})
 }
 
@@ -54,7 +56,7 @@ function makeTerminalProfile(release:cms.CmsRelease):vscode.TerminalProfile {
  * @returns list out of ["python", "cpp"]. Empty is possible
  */
 async function listLanguagesToSetupInRelease(release:cms.CmsRelease) : Promise<string[]> {
-	let res = new Array<string>()
+	const res = new Array<string>()
 	if (!await py.isPythonFullySetup(release))
 		res.push("python")
 	if (!await cpp.isCppFullySetup(release))
@@ -66,66 +68,48 @@ async function listLanguagesToSetupInRelease(release:cms.CmsRelease) : Promise<s
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "cmssw-vscode" is now active!');
-	//console.log(context.storageUri)
+	//console.log('Congratulations, your extension "cmssw-vscode" is now active!');
 
 	cms.setWorkspaceStorage(context.workspaceState)
 	cms.setGlobalStorage(context.globalState)
-	/*
-	com.findCmsswReleases().then((releases) => {
-		console.log(com.listCheckedOutPackages(releases[0]))
-	})*/
-	let outputChannel = vscode.window.createOutputChannel("CMSSW")
+	
+	const outputChannel = vscode.window.createOutputChannel("CMSSW")
 	context.subscriptions.push(outputChannel)
 	utils.setOutputChannel(outputChannel)
 
-	let handleExceptionsInCommand = (fct:CallableFunction) => (() => {
+	const handleExceptionsInCommand = (fct:(...args: unknown[]) => unknown):(...args: unknown[]) => unknown => (async () => {
 		try {
-			fct()
+			await fct()
 		} catch (e) {
 			outputChannel.appendLine("ERROR : " + String(e))
-			vscode.window.showErrorMessage("CMSSW extension : an error ocurred :\n" + String(e))
+			if (e instanceof Error && e.stack !== undefined) {
+				outputChannel.appendLine(e.stack)
+				if (e.cause !== undefined) {
+					outputChannel.appendLine("Exception caused by : " + e.cause?.toString())
+					if (e.cause instanceof Error && e.cause.stack !== undefined)
+						outputChannel.appendLine(e.cause.stack)
+				}
+			}
+				
+			void vscode.window.showErrorMessage("CMSSW extension : an error ocurred :\n" + String(e))
 		}
 	})
 
-	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.buildPythonSymlinkTree', handleExceptionsInCommand(() => {
-		const rel = cms.getCurrentRelease()
-		if (rel !== undefined) {
-			py.buildPythonSymlinkTree(rel)
-		}
-	})))
+	py.activateExtensionPython(context, handleExceptionsInCommand)
 
-	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.updatePythonConfig', handleExceptionsInCommand(async () => {
-		const release = cms.getCurrentRelease()
-		if (release !== undefined) {
-			await py.updatePythonConfig(release, context.workspaceState//, vscode.workspace.getConfiguration('cmssw').get('pythonExternalsToIndex', [])
-				)
-		}
-	})))
-
-	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.makeScramVenv', handleExceptionsInCommand(async () => {
-		const release = cms.getCurrentRelease()
-		if (release !== undefined)
-			return py.makeVirtualEnvironment(release)
-		//return addScramVenvToSettings(release) // does not work yet
-	})))
-
-	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.setupPython', async () => {
-		vscode.commands.executeCommand('cmssw-vscode.buildPythonSymlinkTree')
-		await vscode.commands.executeCommand('cmssw-vscode.makeScramVenv')
-		vscode.commands.executeCommand('cmssw-vscode.updatePythonConfig')
+	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.setupCpp', async () => {
+		await cpp.setupCpptools()
 	}))
 
 	context.subscriptions.push(vscode.window.registerTerminalProfileProvider("cmssw-vscode.cmsenv-shell", {
-		async provideTerminalProfile(token) {
+		provideTerminalProfile() {
 			const release = cms.getCurrentRelease()
 			if (release !== undefined)	
 				return makeTerminalProfile(release)
-			else
-				vscode.window.showErrorMessage("CMSSW extension : No CMSSW release selected. You need to select a release (bottom right in status bar) before opening a CMSSW cmsenv terminal")
+			else {
+				void vscode.window.showErrorMessage("CMSSW extension : No CMSSW release selected. You need to select a release (bottom right in status bar) before opening a CMSSW cmsenv terminal")
+				return undefined
+			}
 		},
 	}))
 
@@ -143,10 +127,14 @@ export function activate(context: vscode.ExtensionContext) {
 					throw exc
 			}
 		}
-	}))
+	}));
 
 	// Don't await as it can take a long time
-	cpp.setupCpptools().then((disp) => context.subscriptions.push(disp))
+	cpp.setupCpptools().then((disp) => context.subscriptions.push(disp),
+		(e) => {
+			outputChannel.appendLine("ERROR : " + String(e))
+			void vscode.window.showErrorMessage("CMSSW extension : an error ocurred :\n" + String(e))
+		})
 
 	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.resetExtensionForCurrentRelease', handleExceptionsInCommand(async () => {
 		const release = cms.getCurrentRelease()
@@ -163,7 +151,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(vscode.commands.registerCommand('cmssw-vscode.chooseCmsswWorkingArea', handleExceptionsInCommand(async () => {
 		const releases = await cms.findCmsswReleases()
-		let displayStrings = new Array<string>()
+		const displayStrings = new Array<string>()
 		for (const release of releases) {
 			displayStrings.push(cms.userFriendlyReleaseLocation(release))
 		}
@@ -187,43 +175,43 @@ export function activate(context: vscode.ExtensionContext) {
 				throw Error("Could not set release")
 			}
 			
-			let languagesToSetup = await listLanguagesToSetupInRelease(newRelease)
+			const languagesToSetup = await listLanguagesToSetupInRelease(newRelease)
 			if (languagesToSetup.length > 0) {
 				if (languagesToSetup.length > 1)
 					languagesToSetup.push("All")
-				let pickRes = await  vscode.window.showInformationMessage(
+				const pickRes = await  vscode.window.showInformationMessage(
 					"We detected that some lanuguages were not yet configured for VSCode in the current CMSSW languages. Do you wish to set them up ?",
 					...languagesToSetup)
-				let setupPython = () => vscode.commands.executeCommand("cmssw-vscode.setupPython")
-				let setupCpp = () => vscode.commands.executeCommand("cmssw-vscode.setupCpp")
-				let setupPromises:Thenable<unknown>[] = []
+				const setupPython = () => vscode.commands.executeCommand("cmssw-vscode.setupPython")
+				const setupCpp = () => vscode.commands.executeCommand("cmssw-vscode.setupCpp")
+				const setupPromises:Thenable<unknown>[] = []
 				if (pickRes === undefined)
 					return
 				if (["All", "python"].includes(pickRes))
 					setupPromises.push(setupPython())
 				if (["All", "cpp"].includes(pickRes))
 					setupPromises.push(setupCpp())
-				let setupRes = await Promise.allSettled(setupPromises)
-				let rejectedPromises = setupRes.filter((res) => res.status === "rejected") as PromiseRejectedResult[]
+				const setupRes = await Promise.allSettled(setupPromises)
+				const rejectedPromises = setupRes.filter((res) => res.status === "rejected") as PromiseRejectedResult[]
 				if (rejectedPromises.length > 0) {
-					const excString = rejectedPromises.map((res) => res.reason).toString()
+					const excString = rejectedPromises.map((res):string => res.reason as string).toString()
 					utils.logToOC("ERROR : could not setup languages for CMS release area " + newReleaseChosen.toString() + "\nDue to : " + excString)
 					const clearRes = await vscode.window.showErrorMessage("CMSSW : could not setup languages for CMSSW release area, due to " +excString + "\nYou can try clearing the extension state", "Clear")
 					if (clearRes === "Clear")
-						vscode.commands.executeCommand("cmssw-vscode.resetExtensionForCurrentRelease")
+						void vscode.commands.executeCommand("cmssw-vscode.resetExtensionForCurrentRelease")
 					
 				}
 			}
 		}
 	})))
 
-	let statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
+	const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
 	statusBar.command = "cmssw-vscode.chooseCmsswWorkingArea"
-	let updateStatusbarText = (release:cms.CmsRelease|undefined) => {
+	const updateStatusbarText = (release:cms.CmsRelease|undefined) => {
 		if (release !== undefined) {
-			statusBar.text = cms.userFriendlyReleaseLocation(release)
+			statusBar.text = "$(cms-icon)" + cms.userFriendlyReleaseLocation(release)
 		} else {
-			statusBar.text = "No CMSSW release set"
+			statusBar.text = "$(cms-icon)No CMSSW release set"
 		}
 	}
 	updateStatusbarText(cms.getCurrentRelease())

@@ -10,7 +10,7 @@ let cppApi:vsCpp.CppToolsApi|undefined = undefined;
 let cppConfProvider:CmsswConfigurationProvider|undefined = undefined
 
 /** Cache of parsed compile_commands.json. Values are Promise so we ensure parsing is only done once (otherwise it could be done multiple times in parallel) */
-let compileCommandsCache:Map<cms.CmsReleaseBase, Promise<CompileCommand[]>> = new Map()
+const compileCommandsCache = new Map<cms.CmsReleaseBase, Promise<CompileCommand[]>>()
 
 /** Cache of CXX compiler path (gcc) for release and arch */
 //let cppCompilerCache:Map<cms.CmsReleaseBase, Promise<string>> = new Map()
@@ -30,6 +30,7 @@ let compileCommandsCache:Map<cms.CmsReleaseBase, Promise<CompileCommand[]>> = ne
 //     return compilerPathPromise
 // }
 async function getCppCompilerPath(release:cms.CmsRelease):Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access
     return JSON.parse(await nodeFs.readFile(path.join(release.rootFolder.fsPath, ".SCRAM", release.scram_arch, "tools", "gcc-cxxcompiler"), "utf8")).CXX
 }
 
@@ -64,11 +65,11 @@ function parsedCompileCommandToSourceConfiguration(parsedCommand:ParsedCompileCo
 }
 
 function parseCompileCommand(command:CompileCommand):ParsedCompileCommand {
-    let defines:string[] = []
+    const defines:string[] = []
     const defineRe = /([a-zA-Z0-9_]{1,})={0,1}/
     let cppStandard:string|undefined = undefined
-    let regularIncludes:string[] = []
-    let systemIncludes:string[] = []
+    const regularIncludes:string[] = []
+    const systemIncludes:string[] = []
     let sourcePath:string|undefined = undefined
     /** Ignore next argument if set to true */
     let ignoreNext = false
@@ -78,7 +79,7 @@ function parseCompileCommand(command:CompileCommand):ParsedCompileCommand {
             continue
         }
         let failedParse = false
-        if (arg[0] === "-") {
+        if (arg.startsWith("-")) {
             const commandWoDash = arg.slice(1)
             if (commandWoDash.startsWith("std")) { // -std=c++17
                 cppStandard = commandWoDash.slice(4)
@@ -86,13 +87,14 @@ function parseCompileCommand(command:CompileCommand):ParsedCompileCommand {
                 systemIncludes.push(arg.slice(8))
             } else {
                 switch (arg[1]) {
-                    case "D":
+                    case "D": {
                         const matchRes = defineRe.exec(arg.slice(2))
-                        if (matchRes !== null && matchRes[1] !== undefined)
+                        if (matchRes?.[1] !== undefined)
                             defines.push(matchRes[1])
                         else 
                             failedParse = true
                         break
+                    }
                     case "I":
                         regularIncludes.push(arg.slice(2))
                         break
@@ -111,7 +113,7 @@ function parseCompileCommand(command:CompileCommand):ParsedCompileCommand {
                 }
             }
             
-        } else if (arg === "clang++" || arg === "") {
+        } else if (arg === "clang++" || arg === "") { // discard
         } else {
             if (sourcePath === undefined)
                 sourcePath = arg
@@ -132,7 +134,7 @@ function parseCompileCommand(command:CompileCommand):ParsedCompileCommand {
 }
 
 async function loadCompileCommands(release:cms.CmsReleaseBase) : Promise<CompileCommand[]> {
-    //return JSON.parse(await nodeFs.readFile('/home/cuisset/cms/vscode-extension/test_workspace/compile_commands.json', {encoding : 'utf8'}));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     return JSON.parse(await nodeFs.readFile(path.join(release.cvmfsPath(), "compile_commands.json"), {encoding : 'utf8'}));
 }
 
@@ -152,7 +154,7 @@ function getCompileCommandForFile(release:cms.CmsRelease|cms.CmsReleaseBase, com
         pathFromRelease = uri.fsPath.split("/").slice(7).join()
     } else {
         if (!(release instanceof cms.CmsRelease) || !uri.fsPath.startsWith(release.rootFolder.fsPath))
-            throw new Error("C++ : Could not map file " + uri.toString() + " to release " + release)
+            throw new Error("C++ : Could not map file " + uri.toString() + " to release " + release.toString())
         pathFromRelease = uri.fsPath.slice(release.rootFolder.fsPath.length)
     }
     const pathSplit = pathFromRelease.split("/")
@@ -185,7 +187,7 @@ async function provideConfigurationForFile(uri:vscode.Uri) : Promise<vsCpp.Sourc
     const release = await cms.resolveBaseRelease(await cms.CmsRelease.fromAnyUriInRelease(uri))
     const compileCommands = getCompileCommandForFile(release, await getCompileCommandsForRelease(release), uri)
     const parsedCommand = parseCompileCommand(compileCommands)
-    let res:vsCpp.SourceFileConfiguration = {defines:parsedCommand.defines, includePath:parsedCommand.systemIncludes.concat(parsedCommand.regularIncludes),
+    const res:vsCpp.SourceFileConfiguration = {defines:parsedCommand.defines, includePath:parsedCommand.systemIncludes.concat(parsedCommand.regularIncludes),
         intelliSenseMode:'gcc-x64', standard:parseCppStandard(parsedCommand.cppStandard),
         compilerPath: pathToGccStarter(release).fsPath} 
     console.log(res)
@@ -193,14 +195,15 @@ async function provideConfigurationForFile(uri:vscode.Uri) : Promise<vsCpp.Sourc
 }
 
 class CmsswConfigurationProvider implements vsCpp.CustomConfigurationProvider {
-    name: string = "CMSSW";
-    extensionId: string = "cmssw-vscode"
+    name = "CMSSW";
+    extensionId = "cmssw-vscode"
 
 
-    async canProvideBrowseConfiguration(token?: any): Promise<boolean> {
+    // eslint-disable-next-line @typescript-eslint/require-await
+    async canProvideBrowseConfiguration(): Promise<boolean> {
         return cms.getCurrentRelease() !== undefined
     }
-    async provideBrowseConfiguration(token?: any): Promise<vsCpp.WorkspaceBrowseConfiguration> {
+    async provideBrowseConfiguration(): Promise<vsCpp.WorkspaceBrowseConfiguration> {
         const release = cms.getCurrentRelease()
         if (release === undefined)
             throw new Error("Cannot provide browseConfiguration since no CMSSW release is set")
@@ -212,11 +215,12 @@ class CmsswConfigurationProvider implements vsCpp.CustomConfigurationProvider {
             standard:parseCppStandard(parsedCompileCommand.cppStandard)
         }
     }
-    async canProvideConfiguration(uri: vscode.Uri, token?: any): Promise<boolean> {
+    // eslint-disable-next-line @typescript-eslint/require-await
+    async canProvideConfiguration(uri: vscode.Uri): Promise<boolean> {
         return true
     }
-    async provideConfigurations(uris: vscode.Uri[], token?: any): Promise<vsCpp.SourceFileConfigurationItem[]> {
-        let resultConfs:Promise<vsCpp.SourceFileConfigurationItem|undefined>[] = []
+    async provideConfigurations(uris: vscode.Uri[]): Promise<vsCpp.SourceFileConfigurationItem[]> {
+        const resultConfs:Promise<vsCpp.SourceFileConfigurationItem|undefined>[] = []
         for (const uri of uris) {
             resultConfs.push((async ():Promise<vsCpp.SourceFileConfigurationItem|undefined> => {
                 try {
@@ -257,7 +261,8 @@ async function setupForCurrentRelease() {
 export async function setupCpptools() : Promise<vscode.Disposable> {
 	cppApi = await vsCpp.getCppToolsApi(vsCpp.Version.v2)
     if (!cppApi) {
-        vscode.window.showErrorMessage("CMSSW : Could not load the Cpptools API")
+        void vscode.window.showErrorMessage("CMSSW : Could not load the Cpptools API")
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
         return new vscode.Disposable(()=>{})
     }
     cppConfProvider = new CmsswConfigurationProvider()
@@ -276,7 +281,7 @@ export async function setupCpptools() : Promise<vscode.Disposable> {
  * @throws in case something is wrong in the config (should probably clear everything in this case)
  */
 export async function isCppFullySetup(release:cms.CmsRelease):Promise<boolean> {
-	let checkGccStarter = async () => {
+	const checkGccStarter = async () => {
 		try {
 			await vscode.workspace.fs.stat(pathToGccStarter(release))
 			return true;
@@ -286,7 +291,7 @@ export async function isCppFullySetup(release:cms.CmsRelease):Promise<boolean> {
 			throw e;
 		}
 	}
-	let res = await Promise.all([checkGccStarter()])
+	const res = await Promise.all([checkGccStarter()])
 	console.log("isCppFullySetup result")
 	console.log(res)
 	return (res[0])
